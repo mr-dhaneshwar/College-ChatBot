@@ -105,6 +105,7 @@ def main():
     raw_text = get_pdf_text(pdf_file_path)
     # st.write(raw_text)
     # st.code(raw_text)
+    #
     text_chunks = get_text_chunks(raw_text)
     get_vector_store(text_chunks)
     # Chatbot interaction
