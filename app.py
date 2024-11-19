@@ -108,19 +108,11 @@ def main():
     text_chunks = get_text_chunks(raw_text)
     get_vector_store(text_chunks)
     # Chatbot interaction
+    
     user_question = st.chat_input("Ask a question about the college:")
-    # prompt_template = f"""
-    # Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-    # provided context just say, "answer is not available in the context", don't provide the wrong answer\n\n
-    # Context:\n {raw_text}?\n
-    # Question: \n{user_question}\n
-    # """
     if user_question:
         st.write("**👤:** "+str(user_question))
         A = user_input(user_question)
-        # A = angel(prompt_template)
-        # if "not" and "context" in A:
-        #     A = A+" you can find it from-->\n"+angel(Q)
         st.write("**🤖:** ",A)
 
 if __name__ == "__main__":
