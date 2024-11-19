@@ -1,75 +1,127 @@
-import os
-import streamlit as st
-from dotenv import load_dotenv
-from langchain.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.chains.question_answering import load_qa_chain
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
-import pandas as pd
+import google.generativeai as genai
+from dotenv import load_dotenv
+from PyPDF2 import PdfReader
+import streamlit as st
+import os,shutil
+from geminiAPI import*
 
-# Load the Google API key from the .env file
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
+os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Configure Google Generative AI with the API key
-from google.generativeai import configure
-configure(api_key=api_key)
+def dltfaiss():
+    try:
+        shutil.rmtree("faiss_index")
+    except Exception as e:
+        print(e)
 
-# Function to load CSV data
-def load_csv_data(file_path):
-    df = pd.read_csv(file_path)
-    text = "\n".join(df.astype(str).apply(lambda x: " ".join(x), axis=1))
+
+def get_pdf_text(filepath):
+    text = ""
+    try:
+        pdf_reader = PdfReader(filepath)
+        for page in pdf_reader.pages:
+            text += page.extract_text() #or ""  # Ensures that None is handled
+    except Exception as e:
+        print(f"An error occurred: {e}")
     return text
 
-# Create a vector store with embeddings
-def create_vector_store(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    text_chunks = text_splitter.split_text(text)
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    return vector_store
 
-# Create a QA chain
-def create_qa_chain():
+
+def get_text_chunks(text):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    chunks = text_splitter.split_text(text)
+    return chunks
+
+
+def get_vector_store(text_chunks):
+    # dltfaiss()
+    embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
+    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
+    vector_store.save_local("faiss_index")
+
+
+def get_conversational_chain():
+
     prompt_template = """
-    Answer the question in detail based on the provided context. If the context does not contain the answer, say "Answer not found in context."
-    Context:
-    {context}
-    
-    Question:
-    {question}
-    
+    Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
+    provided context just say, "answer is not available in the context", don't provide the wrong answer\n\n
+    Context:\n {context}?\n
+    Question: \n{question}\n
+
     Answer:
     """
-    model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+
+
+    model = ChatGoogleGenerativeAI(model="gemini-pro",
+                             temperature=0.3)
+
+    prompt = PromptTemplate(template = prompt_template, input_variables = ["context", "question"])
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
+
     return chain
+
+
+
+def user_input(user_question):
+
+    if os.path.exists("faiss_index"):
+
+        embeddings = GoogleGenerativeAIEmbeddings(model = "models/embedding-001")
+        
+        # new_db = FAISS.load_local("faiss_index", embeddings)
+        new_db = FAISS.load_local("faiss_index", embeddings,allow_dangerous_deserialization=True)
+        docs = new_db.similarity_search(user_question)  
+
+        chain = get_conversational_chain()
+
+        
+        response = chain(
+            {"input_documents":docs, "question": user_question}
+            , return_only_outputs=True)
+
+        print(response)
+        # st.write("Reply: ", response["output_text"])
+        return response["output_text"]
+    
+    else:
+        return "You Did not provide any PDF, First upload the PDF"
+
 
 # Streamlit application
 def main():
-    st.set_page_config("College Chatbot")
+    st.set_page_config(page_title="College Chatbot")
     st.title("College Chatbot")
 
-    if 'vector_store' not in st.session_state:
-        # Load CSV data and create vector store
-        csv_file_path = "data.csv"  # Change this to your CSV file path
-        text = load_csv_data(csv_file_path)
-        vector_store = create_vector_store(text)
-        st.session_state['vector_store'] = vector_store
-    else:
-        vector_store = st.session_state['vector_store']
-
+    # Hardcoded JSON file path (replace with your file path)
+    pdf_file_path = "TAE PDF.pdf"  # Change this to your JSON file path
+    
+    raw_text = get_pdf_text(pdf_file_path)
+    # st.write(raw_text)
+    # st.code(raw_text)
+    text_chunks = get_text_chunks(raw_text)
+    get_vector_store(text_chunks)
     # Chatbot interaction
     user_question = st.chat_input("Ask a question about the college:")
+    # prompt_template = f"""
+    # Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
+    # provided context just say, "answer is not available in the context", don't provide the wrong answer\n\n
+    # Context:\n {raw_text}?\n
+    # Question: \n{user_question}\n
+    # """
     if user_question:
-        st.write("**👤:** "+user_question)
-        docs = vector_store.similarity_search(user_question, k=3)  # Retrieve top 3 relevant documents
-        chain = create_qa_chain()
-        response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
-        st.write("**🤖:** ", response["output_text"])
+        st.write("**👤:** "+str(user_question))
+        A = user_input(user_question)
+        # A = angel(prompt_template)
+        # if "not" and "context" in A:
+        #     A = A+" you can find it from-->\n"+angel(Q)
+        st.write("**🤖:** ",A)
 
 if __name__ == "__main__":
     main()
